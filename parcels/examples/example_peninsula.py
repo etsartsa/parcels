@@ -77,7 +77,7 @@ def UpdateP(particle, fieldset, time, dt):
 
 
 def pensinsula_example(fieldset, npart, mode='jit', degree=1,
-                       verbose=False, output=True, method=AdvectionRK4):
+                       verbose=True, output=True, method=AdvectionRK4):
     """Example configuration of particle flow around an idealised Peninsula
 
     :arg filename: Basename of the input fieldset
@@ -99,7 +99,7 @@ def pensinsula_example(fieldset, npart, mode='jit', degree=1,
 
     # Initialise particles
     x = 3. * (1. / 1.852 / 60)  # 3 km offset from boundary
-    y = (fieldset.U.lat[0] + x, fieldset.U.lat[-1] - x)  # latitude range, including offsets
+    y = (fieldset.U.lat[0] + 0.001, fieldset.U.lat[-1] - 2*x)  # latitude range, including offsets
     pset = ParticleSet.from_line(fieldset, size=npart, pclass=MyParticle,
                                  start=(x, y[0]), finish=(x, y[1]), time=0)
 
@@ -114,7 +114,7 @@ def pensinsula_example(fieldset, npart, mode='jit', degree=1,
     out = pset.ParticleFile(name="MyParticle") if output else None
     interval = delta(hours=1) if output else -1
     print("Peninsula: Advecting %d particles for %s" % (npart, str(time)))
-    pset.execute(k_adv + k_p, endtime=time, dt=dt, output_file=out, interval=interval)
+    pset.execute(k_adv + k_p, endtime=time, dt=dt, output_file=out, interval=interval, show_movie=fieldset.V)
 
     if verbose:
         print("Final particle positions:\n%s" % pset)
@@ -160,7 +160,7 @@ def test_peninsula_file(fieldsetfile, mode):
 if __name__ == "__main__":
     p = ArgumentParser(description="""
 Example of particle advection around an idealised peninsula""")
-    p.add_argument('mode', choices=('scipy', 'jit'), nargs='?', default='jit',
+    p.add_argument('mode', choices=('scipy', 'jit'), nargs='?', default='scipy',
                    help='Execution mode for performing RK4 computation')
     p.add_argument('-p', '--particles', type=int, default=20,
                    help='Number of particles to advect')

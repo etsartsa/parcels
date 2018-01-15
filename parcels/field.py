@@ -472,6 +472,98 @@ class Field(object):
             raise FieldSamplingError(x, y, z, field=self)
         else:
             return val
+        
+    def spatial_interpolation_slip(self, tidx, z, y, x, time):
+        """Interpolate horizontal field values using a Our interpolator"""
+        debug = False
+        
+        lon_idx = self.lon_index(x)
+        lat_idx = self.lat_index(y)
+        
+        ###########
+        # aa # bb #
+        ###########
+        # cc # dd #
+        ###########
+        
+        aa = self.data[tidx, lat_idx     , lon_idx]
+        bb = self.data[tidx, lat_idx     , lon_idx + 1]
+        cc = self.data[tidx, lat_idx + 1 , lon_idx]
+        dd = self.data[tidx, lat_idx + 1 , lon_idx + 1]
+        
+        # latitude and longitude temporal arrays
+        lat_array = np.array([self.grid.lat[lat_idx] , self.grid.lat[lat_idx + 1]])
+        lon_array = np.array([self.grid.lon[lon_idx] , self.grid.lon[lon_idx + 1]])
+         
+        data_matrix = np.array([[aa, bb] , [cc, dd]])
+        
+        is_land = data_matrix == 0
+        
+        if is_land.any():
+        
+            # Calculate in which square of the grid is the particle
+            if (abs(abs(y) - abs(self.grid.lat[lat_idx])) < abs(abs(y) - abs(self.grid.lat[lat_idx + 1]))):
+                x_idx = 0
+            else:
+                x_idx = 1
+            if (abs(abs(x) - abs(self.grid.lon[lon_idx])) < abs(abs(x) - abs(self.grid.lon[lon_idx + 1]))):
+                y_idx = 0
+            else:
+                y_idx = 1
+                
+            if debug:
+                print (self.name)
+                print ('Latitude')
+                print (y)
+                print (lat_array)
+                print ('Longitude')
+                print (lon_array)
+                print (x)
+                print ('data_matrix')
+                print (data_matrix)
+                print ('particle velocity')
+                print (data_matrix[y_idx , x_idx])
+            
+            # No-slip and free-slip conditions
+            tmp = np.zeros((2,2))
+#            
+            if self.name == 'U':
+                tmp[x_idx , y_idx - 1] = - data_matrix[x_idx , y_idx]
+                tmp[x_idx - 1 , y_idx] =   data_matrix[x_idx , y_idx]
+                
+                mask = tmp * is_land
+                
+                if debug:
+                    print ('tmp')
+                    print (tmp)
+                data_matrix = data_matrix + mask
+            
+            if self.name == 'V':
+                tmp[x_idx , y_idx - 1] = + data_matrix[x_idx , y_idx]
+                tmp[x_idx - 1 , y_idx] = - data_matrix[x_idx , y_idx]
+                if debug:
+                    print ('tmp')
+                    print (tmp)
+                mask = tmp * is_land
+                data_matrix = data_matrix + mask
+                  
+            if debug:
+                print ('is_land')
+                print (is_land)
+                print ('changed data_matrix')
+                print (data_matrix)
+            
+            val = RegularGridInterpolator((lat_array, lon_array), data_matrix,
+                                           bounds_error=False, fill_value=np.nan,
+                                           method=self.interp_method)((y,x)) 
+        else:
+            val = self.interpolator2D(tidx)((y, x))
+      
+        if np.isnan(val):
+            # Detect Out-of-bounds sampling and raise exception
+            raise FieldSamplingError(x, y, z, field=self)
+        else:
+            return val
 
     def time_index(self, time):
         """Find the index in the time array associated with a given time
@@ -496,6 +588,28 @@ class Field(object):
             return (len(self.grid.time) - 1, 0)
         else:
             return (time_index.argmin() - 1 if time_index.any() else 0, 0)
+    
+    def lat_index(self, lat):
+        """ find the index in the lat array  associated with a given latitude """
+        # Case where lat is outside to the right
+        if lat > self.grid.lat[-1]:
+            return (len(self.grid.lat))
+        lat_index = self.grid.lat <= lat
+        # Case where lat is outside to the left
+        if lat_index.all():
+            return 0
+        return lat_index.argmin() - 1
+
+    def lon_index(self, lon):
+        """ find the index in the lin array  associated with a given longitude """
+        # Case where lon is outside to the right
+        if lon > self.grid.lon[-1]:
+            return (len(self.grid.lon)-2)
+        lon_index = self.grid.lon <= lon
+        # Case where lon is outside to the left
+        if lon_index.all():
+            return 0
+        return lon_index.argmin() - 1
 
     def depth_index(self, depth, lat, lon):
         """Find the index in the depth array associated with a given depth"""
@@ -508,7 +622,7 @@ class Field(object):
             return len(self.grid.depth) - 2
         else:
             return depth_index.argmin() - 1 if depth_index.any() else 0
-
+    
     def eval(self, time, x, y, z):
         """Interpolate field values in space and time.
 
@@ -516,11 +630,12 @@ class Field(object):
         conversion to the result. Note that we defer to
         scipy.interpolate to perform spatial interpolation.
         """
+        
         (t_idx, periods) = self.time_index(time)
         time -= periods*(self.grid.time[-1]-self.grid.time[0])
         if t_idx < len(self.grid.time)-1 and time > self.grid.time[t_idx]:
-            f0 = self.spatial_interpolation(t_idx, z, y, x, time)
-            f1 = self.spatial_interpolation(t_idx + 1, z, y, x, time)
+            f0 = self.spatial_interpolation_slip(t_idx, z, y, x, time)
+            f1 = self.spatial_interpolation_slip(t_idx + 1, z, y, x, time)
             t0 = self.grid.time[t_idx]
             t1 = self.grid.time[t_idx + 1]
             value = f0 + (f1 - f0) * ((time - t0) / (t1 - t0))
@@ -531,7 +646,7 @@ class Field(object):
             value = self.spatial_interpolation(t_idx, z, y, x, self.grid.time[t_idx-1])
 
         return self.units.to_target(value, x, y, z)
-
+ 
     def ccode_eval(self, var, t, x, y, z):
         # Casting interp_methd to int as easier to pass on in C-code
         gridset = self.fieldset.gridset
