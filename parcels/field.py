@@ -475,10 +475,10 @@ class Field(object):
         
     def spatial_interpolation_slip(self, tidx, z, y, x, time):
         """Interpolate horizontal field values using a Our interpolator"""
-        debug = False
+        debug = True
         
-        lon_idx = self.lon_index(x)
-        lat_idx = self.lat_index(y)
+        lon_idx = self.lon_index(x,y,z)
+        lat_idx = self.lat_index(x,y,z)
         
         ###########
         # aa # bb #
@@ -521,8 +521,7 @@ class Field(object):
                 print (x)
                 print ('data_matrix')
                 print (data_matrix)
-                print ('particle velocity')
-                print (data_matrix[y_idx , x_idx])
+                
             
             # No-slip and free-slip conditions
             tmp = np.zeros((2,2))
@@ -558,7 +557,9 @@ class Field(object):
                                            method=self.interp_method)((y,x)) 
         else:
             val = self.interpolator2D(tidx)((y, x))
-      
+            
+        
+        
         if np.isnan(val):
             # Detect Out-of-bounds sampling and raise exception
             raise FieldSamplingError(x, y, z, field=self)
@@ -589,26 +590,26 @@ class Field(object):
         else:
             return (time_index.argmin() - 1 if time_index.any() else 0, 0)
     
-    def lat_index(self, lat):
+    def lat_index(self,x,y,z):
         """ find the index in the lat array  associated with a given latitude """
         # Case where lat is outside to the right
-        if lat > self.grid.lat[-1]:
-            return (len(self.grid.lat))
-        lat_index = self.grid.lat <= lat
+        if y > self.grid.lat[-1]:
+            raise FieldSamplingError(x, y, z, field=self)
+        lat_index = self.grid.lat <= y
         # Case where lat is outside to the left
         if lat_index.all():
-            return 0
+            raise FieldSamplingError(x, y, z, field=self)
         return lat_index.argmin() - 1
 
-    def lon_index(self, lon):
+    def lon_index(self,x,y,z):
         """ find the index in the lin array  associated with a given longitude """
         # Case where lon is outside to the right
-        if lon > self.grid.lon[-1]:
-            return (len(self.grid.lon)-2)
-        lon_index = self.grid.lon <= lon
+        if x > self.grid.lon[-1]:
+            raise FieldSamplingError(x, y, z, field=self)
+        lon_index = self.grid.lon <= x
         # Case where lon is outside to the left
         if lon_index.all():
-            return 0
+            raise FieldSamplingError(x, y, z, field=self)
         return lon_index.argmin() - 1
 
     def depth_index(self, depth, lat, lon):
@@ -643,7 +644,7 @@ class Field(object):
             # Skip temporal interpolation if time is outside
             # of the defined time range or if we have hit an
             # excat value in the time array.
-            value = self.spatial_interpolation(t_idx, z, y, x, self.grid.time[t_idx-1])
+            value = self.spatial_interpolation_slip(t_idx, z, y, x, self.grid.time[t_idx-1])
 
         return self.units.to_target(value, x, y, z)
  

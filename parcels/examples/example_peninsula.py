@@ -107,7 +107,7 @@ def pensinsula_example(fieldset, npart, mode='jit', degree=1,
         print("Initial particle positions:\n%s" % pset)
 
     # Advect the particles for 24h
-    time = delta(hours=24)
+    time = delta(hours=50)
     dt = delta(minutes=5)
     k_adv = pset.Kernel(method)
     k_p = pset.Kernel(UpdateP)
