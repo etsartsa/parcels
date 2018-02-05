@@ -1,6 +1,9 @@
 """Collection of pre-built advection kernels"""
 from parcels.kernels.error import ErrorCode
 import math
+from parcels.field import Field
+
+
 
 
 __all__ = ['AdvectionRK4', 'AdvectionEE', 'AdvectionRK45', 'AdvectionRK4_3D']
@@ -10,22 +13,36 @@ def AdvectionRK4(particle, fieldset, time, dt):
     """Advection of particles using fourth-order Runge-Kutta integration.
 
     Function needs to be converted to Kernel object before execution"""
-    u1 = fieldset.U[time, particle.lon, particle.lat, particle.depth]
-    v1 = fieldset.V[time, particle.lon, particle.lat, particle.depth]
+
+    #lu, lv are true if there is land at the nearest grid points of the particle
+    (lu,u1) = fieldset.U[time, particle.lon, particle.lat, particle.depth]
+    
+    (lv,v1) = fieldset.V[time, particle.lon, particle.lat, particle.depth]
+    
+    # decrease the timestep of advection if there is land at the nearest grid points of the particle
+    if (lv and lu):
+        particle.dt = particle.dt_initial/10
+        dt          = particle.dt_initial/10
+    else:
+        particle.dt = particle.dt_initial
+        dt          = particle.dt_initial
+        
     lon1, lat1 = (particle.lon + u1*.5*dt, particle.lat + v1*.5*dt)
-    u2, v2 = (fieldset.U[time + .5 * dt, lon1, lat1, particle.depth], fieldset.V[time + .5 * dt, lon1, lat1, particle.depth])
+    (lu2,u2), (lv2, v2) = (fieldset.U[time + .5 * dt, lon1, lat1, particle.depth], fieldset.V[time + .5 * dt, lon1, lat1, particle.depth])
     lon2, lat2 = (particle.lon + u2*.5*dt, particle.lat + v2*.5*dt)
-    u3, v3 = (fieldset.U[time + .5 * dt, lon2, lat2, particle.depth], fieldset.V[time + .5 * dt, lon2, lat2, particle.depth])
+    (lu3, u3), (lv3 , v3) = (fieldset.U[time + .5 * dt, lon2, lat2, particle.depth], fieldset.V[time + .5 * dt, lon2, lat2, particle.depth])
     lon3, lat3 = (particle.lon + u3*dt, particle.lat + v3*dt)
-    u4, v4 = (fieldset.U[time + dt, lon3, lat3, particle.depth], fieldset.V[time + dt, lon3, lat3, particle.depth])
+    (lu4 , u4), (lv4 , v4) = (fieldset.U[time + dt, lon3, lat3, particle.depth], fieldset.V[time + dt, lon3, lat3, particle.depth])
     particle.lon += (u1 + 2*u2 + 2*u3 + u4) / 6. * dt
     particle.lat += (v1 + 2*v2 + 2*v3 + v4) / 6. * dt
+    
 
 
 def AdvectionRK4_3D(particle, fieldset, time, dt):
     """Advection of particles using fourth-order Runge-Kutta integration including vertical velocity.
 
     Function needs to be converted to Kernel object before execution"""
+    
     u1 = fieldset.U[time, particle.lon, particle.lat, particle.depth]
     v1 = fieldset.V[time, particle.lon, particle.lat, particle.depth]
     w1 = fieldset.W[time, particle.lon, particle.lat, particle.depth]

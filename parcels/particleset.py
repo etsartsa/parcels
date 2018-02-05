@@ -11,6 +11,7 @@ from collections import Iterable
 from datetime import timedelta as delta
 from datetime import datetime
 
+
 __all__ = ['ParticleSet']
 
 
@@ -236,7 +237,7 @@ class ParticleSet(object):
                          kernel errors.
         :param show_movie: True shows particles; name of field plots that field as background
         """
-
+        
         # check if pyfunc has changed since last compile. If so, recompile
         if self.kernel is None or (self.kernel.pyfunc is not pyfunc and self.kernel is not pyfunc):
             # Generate and store Kernel
@@ -302,6 +303,7 @@ class ParticleSet(object):
         # Initialise particle timestepping
         for p in self:
             p.dt = dt
+            p.dt_initial = dt
         # Execute time loop in sub-steps (timeleaps)
         assert(timeleaps >= 0)
         leaptime = _starttime
@@ -335,6 +337,7 @@ class ParticleSet(object):
         :param vmax: maximum colour scale (only in single-plot mode)
         :param savefile: Name of a file to save the plot to
         """
+
         try:
             import matplotlib.pyplot as plt
         except:
@@ -344,7 +347,8 @@ class ParticleSet(object):
             from mpl_toolkits.basemap import Basemap
         except:
             Basemap = None
-
+        
+        
         plon = np.array([p.lon for p in self])
         plat = np.array([p.lat for p in self])
         show_time = self[0].time if show_time is None else show_time
@@ -364,6 +368,7 @@ class ParticleSet(object):
         if field is not 'vector':
             plt.ion()
             plt.clf()
+            
             if particles:
                 plt.plot(np.transpose(plon), np.transpose(plat), 'ko')
             if field is True:
@@ -381,7 +386,7 @@ class ParticleSet(object):
             xlbl = 'Zonal distance [m]' if type(self.fieldset.U.units) is UnitConverter else 'Longitude [degrees]'
             ylbl = 'Meridional distance [m]' if type(self.fieldset.U.units) is UnitConverter else 'Latitude [degrees]'
             plt.xlabel(xlbl)
-            plt.ylabel(ylbl)
+            plt.ylabel(ylbl) 
         elif Basemap is None:
             logger.info("Visualisation is not possible. Basemap not found.")
             time_origin = self.fieldset.U.grid.time_origin
@@ -401,6 +406,7 @@ class ParticleSet(object):
             # configuring plot
             lat_median = np.median(lat)
             lon_median = np.median(lon)
+             
             plt.figure()
             m = Basemap(projection='merc', lat_0=lat_median, lon_0=lon_median,
                         resolution='h', area_thresh=100,
@@ -428,10 +434,14 @@ class ParticleSet(object):
             # plotting velocity vector field
             vecs = m.quiver(x, y, normU, normV, speed, cmap=plt.cm.gist_ncar, clim=[vmin, vmax], scale=50, latlon=True)
             m.colorbar(vecs, "right", size="5%", pad="2%")
+            
+        
             # plotting particle data
             if particles:
                 xs, ys = m(plon, plat)
                 m.scatter(xs, ys, color='black')
+                
+                
 
         if time_origin is 0:
             timestr = ' after ' + str(delta(seconds=show_time)) + ' hours'
@@ -440,7 +450,7 @@ class ParticleSet(object):
 
         if particles:
             if field:
-                plt.title('Particles' + timestr)
+                plt.title('Particles'+ timestr )
             elif field is 'vector':
                 plt.title('Particles and velocity field' + timestr)
             else:

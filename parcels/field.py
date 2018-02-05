@@ -460,22 +460,11 @@ class Field(object):
         f0 = self.data[tidx, :]
         f1 = self.data[tidx+1, :]
         return f0 + (f1 - f0) * ((time - t0) / (t1 - t0))
-
+    
+      # spatial interpolation without boundary conditions (needs extension for 3D interpolation) 
     def spatial_interpolation(self, tidx, z, y, x, time):
         """Interpolate horizontal field values using a SciPy interpolator"""
-        if self.grid.depth.size == 1:
-            val = self.interpolator2D(tidx)((y, x))
-        else:
-            val = self.interpolator3D(tidx, z, y, x, time)
-        if np.isnan(val):
-            # Detect Out-of-bounds sampling and raise exception
-            raise FieldSamplingError(x, y, z, field=self)
-        else:
-            return val
         
-    def spatial_interpolation_slip(self, tidx, z, y, x, time):
-        """Interpolate horizontal field values using a Our interpolator"""
-        debug = True
         
         lon_idx = self.lon_index(x,y,z)
         lat_idx = self.lat_index(x,y,z)
@@ -488,8 +477,8 @@ class Field(object):
         
         aa = self.data[tidx, lat_idx     , lon_idx]
         bb = self.data[tidx, lat_idx     , lon_idx + 1]
-        cc = self.data[tidx, lat_idx + 1 , lon_idx]
-        dd = self.data[tidx, lat_idx + 1 , lon_idx + 1]
+        cc = self.data[tidx, lat_idx +1      , lon_idx]
+        dd = self.data[tidx, lat_idx +1      , lon_idx + 1]
         
         # latitude and longitude temporal arrays
         lat_array = np.array([self.grid.lat[lat_idx] , self.grid.lat[lat_idx + 1]])
@@ -497,38 +486,94 @@ class Field(object):
          
         data_matrix = np.array([[aa, bb] , [cc, dd]])
         
-        is_land = data_matrix == 0
+        is_land=data_matrix==0
+        there_is_land = False
         
         if is_land.any():
+            there_is_land = True
+            
+#            try:
+            val = RegularGridInterpolator((lat_array, lon_array), data_matrix,
+                                               bounds_error=False, fill_value=np.nan,
+                                               method=self.interp_method)((y,x)) 
+#            except ValueError:
+#                raise ValueError
+        else:
+            val = self.interpolator2D(tidx)((y, x))
+            
+    
+        if np.isnan(val):
+            # Detect Out-of-bounds sampling and raise exception
+            raise FieldSamplingError(x, y, z, field=self)
+        else:
+            return ((there_is_land , val))
+        
+#        if self.grid.depth.size == 1:
+#            val = self.interpolator2D(tidx)((y, x))
+#        else:
+#            val = self.interpolator3D(tidx, z, y, x, time)
+#        if np.isnan(val):
+#            # Detect Out-of-bounds sampling and raise exception
+#            raise FieldSamplingError(x, y, z, field=self)
+#        else:
+#            return val
+     
+        
+     # spatial interpolation with no-slip flow (needs extension for 3D interpolation)    
+    def spatial_interpolation_noslip(self, tidx, z, y, x, time):
+        """Interpolate horizontal field values using a Our interpolator"""
+        debug = False
+        
+        
+        lon_idx = self.lon_index(x,y,z)
+        lat_idx = self.lat_index(x,y,z)
+        
+        ###########
+        # aa # bb #
+        ###########
+        # cc # dd #
+        ###########
+        
+        aa = self.data[tidx, lat_idx     , lon_idx]
+        bb = self.data[tidx, lat_idx     , lon_idx + 1]
+        cc = self.data[tidx, lat_idx +1      , lon_idx]
+        dd = self.data[tidx, lat_idx +1      , lon_idx + 1]
+        
+        # latitude and longitude temporal arrays
+        lat_array = np.array([self.grid.lat[lat_idx] , self.grid.lat[lat_idx + 1]])
+        lon_array = np.array([self.grid.lon[lon_idx] , self.grid.lon[lon_idx + 1]])
+         
+        data_matrix = np.array([[aa, bb] , [cc, dd]])
+        
+       
+        is_land = data_matrix == 0
+        there_is_land = False
+        
+        if is_land.any():
+            there_is_land = True
         
             # Calculate in which square of the grid is the particle
-            if (abs(abs(y) - abs(self.grid.lat[lat_idx])) < abs(abs(y) - abs(self.grid.lat[lat_idx + 1]))):
+            if (abs(y - self.grid.lat[lat_idx]) < abs(y - self.grid.lat[lat_idx + 1])):
                 x_idx = 0
             else:
                 x_idx = 1
-            if (abs(abs(x) - abs(self.grid.lon[lon_idx])) < abs(abs(x) - abs(self.grid.lon[lon_idx + 1]))):
+            if (abs(x - self.grid.lon[lon_idx]) < abs(x - self.grid.lon[lon_idx + 1])):
                 y_idx = 0
             else:
                 y_idx = 1
-                
-            if debug:
-                print (self.name)
-                print ('Latitude')
-                print (y)
-                print (lat_array)
-                print ('Longitude')
-                print (lon_array)
-                print (x)
-                print ('data_matrix')
-                print (data_matrix)
+               
                 
             
             # No-slip and free-slip conditions
             tmp = np.zeros((2,2))
-#            
+           
             if self.name == 'U':
-                tmp[x_idx , y_idx - 1] = - data_matrix[x_idx , y_idx]
-                tmp[x_idx - 1 , y_idx] =   data_matrix[x_idx , y_idx]
+                tmp[x_idx , y_idx - 1]   = - data_matrix[x_idx , y_idx] #meion
+                tmp[x_idx - 1 , y_idx]   = - data_matrix[x_idx , y_idx]#
+                if is_land[x_idx-1 , y_idx]==1:
+                   tmp[x_idx - 1 , y_idx-1] =  - tmp[x_idx-1 , y_idx]
+                else:
+                   tmp[x_idx - 1 , y_idx-1] =  - data_matrix[x_idx-1 , y_idx]     
                 
                 mask = tmp * is_land
                 
@@ -538,25 +583,37 @@ class Field(object):
                 data_matrix = data_matrix + mask
             
             if self.name == 'V':
-                tmp[x_idx , y_idx - 1] = + data_matrix[x_idx , y_idx]
-                tmp[x_idx - 1 , y_idx] = - data_matrix[x_idx , y_idx]
-                if debug:
-                    print ('tmp')
-                    print (tmp)
+                tmp[x_idx , y_idx - 1] = - data_matrix[x_idx , y_idx]#
+                tmp[x_idx - 1 , y_idx] = - data_matrix[x_idx , y_idx]#meion
+                if is_land[x_idx-1 , y_idx]==1:
+                   tmp[x_idx - 1 , y_idx-1] = -  tmp[x_idx-1 , y_idx]
+                else:
+                   tmp[x_idx - 1 , y_idx-1] = - data_matrix[x_idx-1 , y_idx]
+                   
+               
                 mask = tmp * is_land
                 data_matrix = data_matrix + mask
                   
-            if debug:
-                print ('is_land')
-                print (is_land)
-                print ('changed data_matrix')
-                print (data_matrix)
             
-            val = RegularGridInterpolator((lat_array, lon_array), data_matrix,
-                                           bounds_error=False, fill_value=np.nan,
-                                           method=self.interp_method)((y,x)) 
+            try:
+                val = RegularGridInterpolator((lat_array, lon_array), data_matrix,
+                                               bounds_error=False, fill_value=np.nan,
+                                               method=self.interp_method)((y,x)) 
+            except ValueError:
+                print ('Error')
+                print (lat_idx)
+                print (lon_idx)
+                print (len(self.lat))
+                print (len(self.lon))
+                print (lat_array)
+                print (lon_array)
+                print (data_matrix)
+                print (x)
+                print (y)
+                raise ValueError
         else:
             val = self.interpolator2D(tidx)((y, x))
+            
             
         
         
@@ -564,7 +621,321 @@ class Field(object):
             # Detect Out-of-bounds sampling and raise exception
             raise FieldSamplingError(x, y, z, field=self)
         else:
-            return val
+            return ((there_is_land , val))    
+          
+        
+    def spatial_interpolation_freeslip(self, tidx, z, y, x, time):
+        """Interpolate horizontal field values using a Our interpolator"""
+        debug = False
+        
+        
+        lon_idx = self.lon_index(x,y,z)
+        lat_idx = self.lat_index(x,y,z)
+        
+        ###########
+        # aa # bb #
+        ###########
+        # cc # dd #
+        ###########
+        
+        aa = self.data[tidx, lat_idx     , lon_idx]
+        bb = self.data[tidx, lat_idx     , lon_idx + 1]
+        cc = self.data[tidx, lat_idx +1      , lon_idx]
+        dd = self.data[tidx, lat_idx +1      , lon_idx + 1]
+        
+        # latitude and longitude temporal arrays
+        lat_array = np.array([self.grid.lat[lat_idx] , self.grid.lat[lat_idx + 1]])
+        lon_array = np.array([self.grid.lon[lon_idx] , self.grid.lon[lon_idx + 1]])
+         
+        data_matrix = np.array([[aa, bb] , [cc, dd]])
+        
+       
+        is_land = data_matrix == 0
+        there_is_land = False
+        
+        if is_land.any():
+            there_is_land = True
+        
+            # Calculate in which square of the grid is the particle
+            if (abs(y - self.grid.lat[lat_idx]) < abs(y - self.grid.lat[lat_idx + 1])):
+                x_idx = 0
+            else:
+                x_idx = 1
+            if (abs(x - self.grid.lon[lon_idx]) < abs(x - self.grid.lon[lon_idx + 1])):
+                y_idx = 0
+            else:
+                y_idx = 1
+               
+        
+            
+                
+            
+            # No-slip and free-slip conditions
+            tmp = np.zeros((2,2))
+#            
+            if self.name == 'U':
+                tmp[x_idx , y_idx - 1]   = - data_matrix[x_idx , y_idx] #meion
+                tmp[x_idx - 1 , y_idx]   =   data_matrix[x_idx , y_idx]#
+                if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==0:
+                   tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx , y_idx-1]
+                elif is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1: 
+                    tmp[x_idx - 1 , y_idx-1] =   -tmp[x_idx-1 , y_idx]
+                else:
+                   tmp[x_idx - 1 , y_idx-1] = - data_matrix[x_idx-1 , y_idx]     
+                
+                mask = tmp * is_land
+                
+                
+                data_matrix = data_matrix + mask
+            
+            if self.name == 'V':
+                tmp[x_idx , y_idx - 1] =  data_matrix[x_idx , y_idx]#
+                tmp[x_idx - 1 , y_idx] = - data_matrix[x_idx , y_idx]#meion
+                if is_land[x_idx-1 , y_idx]==0 and is_land[x_idx , y_idx-1]==1:
+                   tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx-1 , y_idx]
+                elif is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1: 
+                   tmp[x_idx - 1 , y_idx-1] =   tmp[x_idx-1 , y_idx]
+                else:
+                   tmp[x_idx - 1 , y_idx-1] = - data_matrix[x_idx , y_idx-1]
+                   
+               
+                mask = tmp * is_land
+                data_matrix = data_matrix + mask
+                  
+           
+            try:
+                val = RegularGridInterpolator((lat_array, lon_array), data_matrix,
+                                               bounds_error=False, fill_value=np.nan,
+                                               method=self.interp_method)((y,x)) 
+            except ValueError:
+                print ('Error')
+               
+                raise ValueError
+        else:
+            val = self.interpolator2D(tidx)((y, x))
+            
+            
+        
+        
+        if np.isnan(val):
+            # Detect Out-of-bounds sampling and raise exception
+            raise FieldSamplingError(x, y, z, field=self)
+        else:
+            return ((there_is_land , val))
+        
+    def spatial_interpolation_newfreeslip(self, tidx, z, y, x, time):
+        """Interpolate horizontal field values using a Our interpolator"""
+        
+        
+        lon_idx = self.lon_index(x,y,z)
+        lat_idx = self.lat_index(x,y,z)
+        
+        ###########
+        # aa # bb #
+        ###########
+        # cc # dd #
+        ###########
+        
+        aa = self.data[tidx, lat_idx     , lon_idx]
+        bb = self.data[tidx, lat_idx     , lon_idx + 1]
+        cc = self.data[tidx, lat_idx +1      , lon_idx]
+        dd = self.data[tidx, lat_idx +1      , lon_idx + 1]
+        
+        # latitude and longitude temporal arrays
+        lat_array = np.array([self.grid.lat[lat_idx] , self.grid.lat[lat_idx + 1]])
+        lon_array = np.array([self.grid.lon[lon_idx] , self.grid.lon[lon_idx + 1]])
+         
+        data_matrix = np.array([[aa, bb] , [cc, dd]])
+        
+       
+        is_land = data_matrix == 0
+        there_is_land = False
+        
+        if is_land.any():
+            there_is_land = True
+        
+            # Calculate in which square of the grid is the particle
+            if (abs(y - self.grid.lat[lat_idx]) < abs(y - self.grid.lat[lat_idx + 1])):
+                x_idx = 0
+            else:
+                x_idx = 1
+            if (abs(x - self.grid.lon[lon_idx]) < abs(x - self.grid.lon[lon_idx + 1])):
+                y_idx = 0
+            else:
+                y_idx = 1
+                
+            # Calculate if particle is closer to the middle of grid cell or to the edge
+            
+            
+              
+            dist_lat = not (abs(y-lat_array[x_idx]))<=(abs(y-((lat_array[x_idx]+lat_array[x_idx-1])/2)))
+                 
+#            dist_lon = not (abs(x-lon_array[y_idx]))<=(abs(x-((lon_array[y_idx]+lon_array[y_idx-1])/2)))
+  
+#            print dist_lon
+#            print dist_lat
+#            dist_lat = True
+#            dist_lon = True
+#            
+                
+            
+            # No-slip and free-slip conditions
+            tmp = np.zeros((2,2))
+#            
+            if self.name == 'U':
+                if y_idx==0:
+                    if data_matrix[x_idx , y_idx]>0:
+                        tmp[x_idx , y_idx - 1]   = - data_matrix[x_idx , y_idx] #normal
+                        tmp[x_idx - 1 , y_idx]   =   data_matrix[x_idx , y_idx] #parallel
+                        if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                            tmp[x_idx - 1 , y_idx-1] =   -tmp[x_idx-1 , y_idx] #normal
+                        elif is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==0:
+                            tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx, y_idx-1]#parallel
+                        else:
+                            tmp[x_idx - 1 , y_idx-1] =  - data_matrix[x_idx-1 , y_idx] #normal
+                    else:
+                        if dist_lon:# or (is_land[x_idx , y_idx-1]+is_land[x_idx-1, y_idx-1])==2:
+                            tmp[x_idx , y_idx - 1]   = -data_matrix[x_idx , y_idx]/2#0# data_matrix[x_idx , y_idx] #meion
+                            tmp[x_idx - 1 , y_idx]   =   data_matrix[x_idx , y_idx]#parallel
+                            if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                                tmp[x_idx - 1 , y_idx-1] =-tmp[x_idx-1 , y_idx]/2#0#   tmp[x_idx-1 , y_idx]
+                            elif is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==0:
+                                tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx, y_idx-1]
+                            else:
+                                tmp[x_idx - 1 , y_idx-1] =-data_matrix[x_idx-1 , y_idx] /2# 0#  data_matrix[x_idx-1 , y_idx] 
+                        else :   
+                            tmp[x_idx , y_idx - 1]   = - data_matrix[x_idx , y_idx] #meion
+                            tmp[x_idx - 1 , y_idx]   =   data_matrix[x_idx , y_idx]#parallel
+                            if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                                tmp[x_idx - 1 , y_idx-1] = -tmp[x_idx-1 , y_idx]
+                            elif is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==0:
+                                tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx, y_idx-1]
+                            else:
+                                tmp[x_idx - 1 , y_idx-1] = - data_matrix[x_idx-1 , y_idx] 
+                else: 
+                    if data_matrix[x_idx , y_idx]>0:
+                        if dist_lon:
+                            tmp[x_idx , y_idx - 1]   =-data_matrix[x_idx , y_idx]/2
+                            tmp[x_idx - 1 , y_idx]   =   data_matrix[x_idx , y_idx]#
+                            
+                            if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                                tmp[x_idx - 1 , y_idx-1] = -tmp[x_idx-1 , y_idx]/2#0#  tmp[x_idx-1 , y_idx]
+                            elif is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==0:
+                                tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx, y_idx-1]    
+                            else:
+                                tmp[x_idx - 1 , y_idx-1] = - data_matrix[x_idx-1 , y_idx] /2#0#  data_matrix[x_idx-1 , y_idx]
+                        else:
+                            tmp[x_idx , y_idx - 1]   = - data_matrix[x_idx , y_idx] #meion
+                            tmp[x_idx - 1 , y_idx]   =   data_matrix[x_idx , y_idx]#
+                            
+                            if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                                tmp[x_idx - 1 , y_idx-1] = - tmp[x_idx-1 , y_idx]
+                            elif is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==0:
+                                tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx, y_idx-1]    
+                            else:
+                                tmp[x_idx - 1 , y_idx-1] = -data_matrix[x_idx-1 , y_idx]
+                            
+                    else:
+                        tmp[x_idx , y_idx - 1]   = - data_matrix[x_idx , y_idx] #meion
+                        tmp[x_idx - 1 , y_idx]   =   data_matrix[x_idx , y_idx]#
+                        
+                        if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                            tmp[x_idx - 1 , y_idx-1] =  - tmp[x_idx-1 , y_idx]
+                        elif is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==0:
+                            tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx, y_idx-1] 
+                        else:
+                            tmp[x_idx - 1 , y_idx-1] =  - data_matrix[x_idx-1, y_idx] 
+                        
+                
+                mask = tmp * is_land
+                
+               
+                data_matrix = data_matrix + mask
+            
+            if self.name == 'V':
+                if x_idx==0:
+                    if data_matrix[x_idx , y_idx]>0:
+                        if dist_lat :# or is_land[x_idx-1 , y_idx]+is_land[x_idx-1 , y_idx-1]==2:
+                            tmp[x_idx , y_idx - 1] =   data_matrix[x_idx , y_idx]#parallel
+                            tmp[x_idx - 1 , y_idx] = - data_matrix[x_idx , y_idx]/2# 0# data_matrix[x_idx , y_idx]#meion
+                            if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                               tmp[x_idx - 1 , y_idx-1] =-tmp[x_idx , y_idx-1]/2# 0#  tmp[x_idx-1 , y_idx]
+                            elif is_land[x_idx-1 , y_idx]==0 and is_land[x_idx , y_idx-1]==1:
+                                tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx-1, y_idx]   
+                            else:
+                               tmp[x_idx - 1 , y_idx-1] =-data_matrix[x_idx , y_idx-1]/2# 0# data_matrix[x_idx , y_idx-1]
+                        else:  
+                            tmp[x_idx , y_idx - 1] =   data_matrix[x_idx , y_idx]#parallel
+                            tmp[x_idx - 1 , y_idx] = - data_matrix[x_idx , y_idx]#meion
+                            if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                               tmp[x_idx - 1 , y_idx-1] = - tmp[x_idx , y_idx-1]
+                            elif is_land[x_idx-1 , y_idx]==0 and is_land[x_idx , y_idx-1]==1:
+                                tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx-1, y_idx]   
+                            else:
+                               tmp[x_idx - 1 , y_idx-1] = - data_matrix[x_idx , y_idx-1]
+                    else:
+                        tmp[x_idx , y_idx - 1] =  data_matrix[x_idx , y_idx]#parallel
+                        tmp[x_idx - 1 , y_idx] = - data_matrix[x_idx , y_idx]#meion
+                        if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                           tmp[x_idx - 1 , y_idx-1] =  - tmp[x_idx , y_idx-1]
+                        elif is_land[x_idx-1 , y_idx]==0 and is_land[x_idx , y_idx-1]==1:
+                            tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx-1, y_idx]    
+                        else:
+                           tmp[x_idx - 1 , y_idx-1] =  -data_matrix[x_idx , y_idx-1]
+                else:  
+                    if data_matrix[x_idx , y_idx]>0:
+                        tmp[x_idx , y_idx - 1] =  data_matrix[x_idx , y_idx]#
+                        tmp[x_idx - 1 , y_idx] = - data_matrix[x_idx , y_idx]#meion
+                        if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                           tmp[x_idx - 1 , y_idx-1] =  - tmp[x_idx , y_idx-1]
+                        elif is_land[x_idx-1 , y_idx]==0 and is_land[x_idx , y_idx-1]==1:
+                            tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx-1, y_idx]    
+                        else:
+                           tmp[x_idx - 1 , y_idx-1] = - data_matrix[x_idx , y_idx-1]
+                    else:
+                        if dist_lat :# or is_land[x_idx-1 , y_idx]+is_land[x_idx-1 , y_idx-1]==2:
+                            tmp[x_idx , y_idx - 1] =  data_matrix[x_idx , y_idx]#
+                            tmp[x_idx - 1 , y_idx] =-data_matrix[x_idx , y_idx]/2# 0# data_matrix[x_idx , y_idx]#meion
+                            if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                               tmp[x_idx - 1 , y_idx-1] =-tmp[x_idx , y_idx-1]/2# 0#  tmp[x_idx-1 , y_idx]
+                            elif is_land[x_idx-1 , y_idx]==0 and is_land[x_idx , y_idx-1]==1:
+                                tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx-1, y_idx]   
+                            else:
+                               tmp[x_idx - 1 , y_idx-1] =-data_matrix[x_idx , y_idx-1]/2#0#  data_matrix[x_idx , y_idx-1]
+                        else:
+                            tmp[x_idx , y_idx - 1] =  data_matrix[x_idx , y_idx]#
+                            tmp[x_idx - 1 , y_idx] = - data_matrix[x_idx , y_idx]#meion
+                            if is_land[x_idx-1 , y_idx]==1 and is_land[x_idx , y_idx-1]==1:
+                               tmp[x_idx - 1 , y_idx-1] = - tmp[x_idx , y_idx-1]
+                            elif is_land[x_idx-1 , y_idx]==0 and is_land[x_idx , y_idx-1]==1:
+                                tmp[x_idx - 1 , y_idx-1] =   data_matrix[x_idx-1, y_idx]   
+                            else:
+                               tmp[x_idx - 1 , y_idx-1] = -data_matrix[x_idx , y_idx-1]#0#  data_matrix[x_idx , y_idx-1]
+                       
+               
+                mask = tmp * is_land
+                data_matrix = data_matrix + mask
+                  
+            
+            try:
+                val = RegularGridInterpolator((lat_array, lon_array), data_matrix,
+                                               bounds_error=False, fill_value=np.nan,
+                                               method=self.interp_method)((y,x)) 
+            except ValueError:
+                print ('Error')
+                
+                raise ValueError
+        else:
+            val = self.interpolator2D(tidx)((y, x))
+            
+            
+        
+        
+        if np.isnan(val):
+            # Detect Out-of-bounds sampling and raise exception
+            raise FieldSamplingError(x, y, z, field=self)
+        else:
+            return ((there_is_land , val))
 
     def time_index(self, time):
         """Find the index in the time array associated with a given time
@@ -593,24 +964,19 @@ class Field(object):
     def lat_index(self,x,y,z):
         """ find the index in the lat array  associated with a given latitude """
         # Case where lat is outside to the right
-        if y > self.grid.lat[-1]:
+        if y < self.grid.lat[0] or y > self.grid.lat[-1]:
             raise FieldSamplingError(x, y, z, field=self)
         lat_index = self.grid.lat <= y
-        # Case where lat is outside to the left
-        if lat_index.all():
-            raise FieldSamplingError(x, y, z, field=self)
-        return lat_index.argmin() - 1
+        return lat_index.argmin() - 1 
 
     def lon_index(self,x,y,z):
         """ find the index in the lin array  associated with a given longitude """
         # Case where lon is outside to the right
-        if x > self.grid.lon[-1]:
+        if x < self.grid.lon[0] or x > self.grid.lon[-1]:
             raise FieldSamplingError(x, y, z, field=self)
         lon_index = self.grid.lon <= x
-        # Case where lon is outside to the left
-        if lon_index.all():
-            raise FieldSamplingError(x, y, z, field=self)
-        return lon_index.argmin() - 1
+ 
+        return lon_index.argmin() - 1 
 
     def depth_index(self, depth, lat, lon):
         """Find the index in the depth array associated with a given depth"""
@@ -635,8 +1001,10 @@ class Field(object):
         (t_idx, periods) = self.time_index(time)
         time -= periods*(self.grid.time[-1]-self.grid.time[0])
         if t_idx < len(self.grid.time)-1 and time > self.grid.time[t_idx]:
-            f0 = self.spatial_interpolation_slip(t_idx, z, y, x, time)
-            f1 = self.spatial_interpolation_slip(t_idx + 1, z, y, x, time)
+            (there_is_land_f0 , f0) = self.spatial_interpolation(t_idx, z, y, x, time)
+            (there_is_land_f1 , f1) = self.spatial_interpolation(t_idx + 1, z, y, x, time)
+            # Both timeframes should contain the same land
+            assert(there_is_land_f0 == there_is_land_f1)
             t0 = self.grid.time[t_idx]
             t1 = self.grid.time[t_idx + 1]
             value = f0 + (f1 - f0) * ((time - t0) / (t1 - t0))
@@ -644,9 +1012,9 @@ class Field(object):
             # Skip temporal interpolation if time is outside
             # of the defined time range or if we have hit an
             # excat value in the time array.
-            value = self.spatial_interpolation_slip(t_idx, z, y, x, self.grid.time[t_idx-1])
+            (there_is_land , value) = self.spatial_interpolation(t_idx, z, y, x, self.grid.time[t_idx-1])
 
-        return self.units.to_target(value, x, y, z)
+        return (there_is_land , self.units.to_target(value, x, y, z))
  
     def ccode_eval(self, var, t, x, y, z):
         # Casting interp_methd to int as easier to pass on in C-code

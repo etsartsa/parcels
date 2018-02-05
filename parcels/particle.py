@@ -130,7 +130,7 @@ class _Particle(object):
                     exit(-1)
                 initial = v.initial[time, lon, lat, depth]
             else:
-                initial = v.initial
+                initial = v.initial              
             # Enforce type of initial value
             if v.name != 'CGridIndexSet':
                 setattr(self, v.name, v.dtype(initial))
@@ -157,6 +157,8 @@ class ScipyParticle(_Particle):
     :param fieldset: :mod:`parcels.fieldset.FieldSet` object to track this particle on
     :param dt: Execution timestep for this particle
     :param time: Current time of the particle
+    :param dt_initial: Execution timestep for this particle (actually holds the value of dt so as to be able to switch again
+                                                                      at the same timestep when the particle go away from land)
 
     Additional Variables can be added via the :Class Variable: objects
     """
@@ -167,6 +169,7 @@ class ScipyParticle(_Particle):
     time = Variable('time', dtype=np.float64)
     id = Variable('id', dtype=np.int32)
     dt = Variable('dt', dtype=np.float32, to_write=False)
+    dt_initial = Variable('dt_initial', dtype=np.float32, to_write=False)
     state = Variable('state', dtype=np.int32, initial=ErrorCode.Success, to_write=False)
 
     def __init__(self, lon, lat, fieldset, depth=0., dt=1., time=0., cptr=None):
@@ -180,9 +183,11 @@ class ScipyParticle(_Particle):
         type(self).id.initial = lastID
         lastID += 1
         type(self).dt.initial = dt
+        type(self).dt_initial.initial = dt
         super(ScipyParticle, self).__init__()
 
     def __repr__(self):
+        print ('malakies')
         time_string = 'not_yet_set' if self.time is None or np.isnan(self.time) else "{:f}".format(self.time)
         return "P[%d](lon=%f, lat=%f, depth=%f, time=%s)" % (self.id, self.lon, self.lat,
                                                              self.depth, time_string)
