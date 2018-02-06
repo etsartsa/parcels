@@ -303,6 +303,7 @@ class ParticleSet(object):
         # Initialise particle timestepping
         for p in self:
             p.dt = dt
+            # set dt_initial to the original dt
             p.dt_initial = dt
         # Execute time loop in sub-steps (timeleaps)
         assert(timeleaps >= 0)
@@ -337,7 +338,6 @@ class ParticleSet(object):
         :param vmax: maximum colour scale (only in single-plot mode)
         :param savefile: Name of a file to save the plot to
         """
-
         try:
             import matplotlib.pyplot as plt
         except:

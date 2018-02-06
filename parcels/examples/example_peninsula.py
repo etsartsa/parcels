@@ -1,6 +1,9 @@
 from parcels import FieldSet, ParticleSet, ScipyParticle, JITParticle, Variable
 from parcels import AdvectionRK4, AdvectionEE, AdvectionRK45
+from parcels import ErrorCode
 from argparse import ArgumentParser
+from parcels import Field
+from matplotlib import rc
 import numpy as np
 import math  # NOQA
 import pytest
@@ -75,7 +78,6 @@ def peninsula_fieldset(xdim, ydim):
 def UpdateP(particle, fieldset, time, dt):
     particle.p = fieldset.P[time, particle.lon, particle.lat, particle.depth]
 
-
 def pensinsula_example(fieldset, npart, mode='jit', degree=1,
                        verbose=True, output=True, method=AdvectionRK4):
     """Example configuration of particle flow around an idealised Peninsula
@@ -89,13 +91,16 @@ def pensinsula_example(fieldset, npart, mode='jit', degree=1,
     class MyParticle(ptype[mode]):
         # JIT compilation requires a-priori knowledge of the particle
         # data structure, so we define additional variables here.
+        
         p = Variable('p', dtype=np.float32, initial=0.)
         p_start = Variable('p_start', dtype=np.float32, initial=fieldset.P)
 
         def __repr__(self):
             """Custom print function which overrides the built-in"""
+            (_ , v1) = self.p
+            (_ , v2) = self.p_start
             return "P(%.4f, %.4f)[p=%.5f, p_start=%f]" % (self.lon, self.lat,
-                                                          self.p, self.p_start)
+                                                          v1, v2)
 
     # Initialise particles
     x = 3. * (1. / 1.852 / 60)  # 3 km offset from boundary
@@ -107,21 +112,21 @@ def pensinsula_example(fieldset, npart, mode='jit', degree=1,
         print("Initial particle positions:\n%s" % pset)
 
     # Advect the particles for 24h
-    time = delta(hours=50)
-    dt = delta(minutes=5)
+    time_total = 48
+    dt =delta(minutes= 5)
     k_adv = pset.Kernel(method)
     k_p = pset.Kernel(UpdateP)
+    
     out = pset.ParticleFile(name="MyParticle") if output else None
-    interval = delta(hours=1) if output else -1
-    print("Peninsula: Advecting %d particles for %s" % (npart, str(time)))
-    pset.execute(k_adv + k_p, endtime=time, dt=dt, output_file=out, interval=interval, show_movie=fieldset.V)
+    interval = delta(hours=1)
+    print("Peninsula: Advecting %d particles for %s" % (npart, str(time_total)))
+    
+    pset.execute(k_adv + k_p, endtime=delta(hours=time_total), dt=dt,output_file=out, interval=interval)   
 
     if verbose:
         print("Final particle positions:\n%s" % pset)
-
     return pset
-
-
+   
 @pytest.mark.parametrize('mode', ['scipy', 'jit'])
 def test_peninsula_fieldset(mode):
     """Execute peninsula test from fieldset generated in memory"""
